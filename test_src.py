@@ -26,7 +26,17 @@ def test_reduced_hyperplanes():
     :param d:
     :return:
     """
-    hpoints1, hpoints2, _  = gen_reducehypercubes(10,(6,1,1,1,1))
+    hpoints1, hpoints2, _  = gen_reducehypercubes(6,(3,2,1), no_loading=True)
+    correct_dict = {(-3,-2,-1):3,
+                    (-3,-2,1):2,
+                    (-3,0,-1):3,
+                    (-1,-2,-1):3,
+                    (-3,0,1):2,
+                    (-1,-2,1):2,
+                    (1,2,1):1,
+                    (3,0,1):1,
+                    (3,2,-1):1,
+                    (3,2,1):0}
     points = set()
     edges = Counter()
     l = hpoints1.shape[1]
@@ -36,5 +46,7 @@ def test_reduced_hyperplanes():
         points.add(p1)
         points.add(p2)
         edges[(p1,p2)]+=1
-    print(edges) # add check to see if
+    for k,v in edges.items():
+        if k in correct_dict:
+            assert correct_dict[k] == v
 

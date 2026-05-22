@@ -41,12 +41,14 @@ def gen_hypercubes(d):
         np.savez(f"matrices{d}.npz", hpoints1, hpoints2)
         return hpoints1, hpoints2
 
-def gen_reducehypercubes(d, b):
+def gen_reducehypercubes(d, b, no_loading=False):
     b = tuple(b)
     l_b = len(b)
     if sum(b)!=d:
         raise("Invalid reduction (sum of b incorrect)")
     try:
+        if no_loading:
+            raise("No loading files")
         data = np.load(f"matrices_red{d}_{b}.npz")
         hpoints1 = data['hpoints1']
         hpoints2 = data['hpoints2']
@@ -59,9 +61,9 @@ def gen_reducehypercubes(d, b):
         def reducepoint(p):
             b_ind = 0
             cur_b = b[0]
-            out = [0] * len(b)
+            out = [0] * l_b
             for i, c in enumerate(p):
-                if i>cur_b:
+                if i>cur_b-1:
                     b_ind += 1
                     cur_b += b[b_ind]
                 out[b_ind] += c
@@ -76,8 +78,8 @@ def gen_reducehypercubes(d, b):
                 edge_count[(p1,p2)]+=1
         l = len(edge_count)
         p_counts = [0] * l
-        hpoints1 = np.ones((d,l))
-        hpoints2 = np.ones((d,l))
+        hpoints1 = np.ones((l_b,l))
+        hpoints2 = np.ones((l_b,l))
         for i, P in enumerate(edge_count):
             p1,p2 = P
             p_counts[i] = edge_count[(p1,p2)]/2
@@ -104,17 +106,6 @@ def get_countfunc(k,d,hpoints1, hpoints2, W=None):
     if W is None:
         W = np.identity(hpoints1.shape[1])
     return lambda h :np.sum(np.max(np.where((h.reshape((k,d))@hpoints1-1)*(h.reshape((k,d))@hpoints2-1)@W > 0,1.0,0.0),axis=0))
-
-def test_hpoints(d):
-    hpoints1, hpoints2 = gen_hypercubes(d)
-    s=set()
-    h_len = hpoints1.shape[1]
-    for i1 in range(h_len):
-        t1=tuple(hpoints1[:,i1])
-        t2=tuple(hpoints2[:,i1])
-        s.add((t1,t2))
-        s.add((t2, t1))
-    assert 2**d*d == len(s)
 
 
 F_dict = {
