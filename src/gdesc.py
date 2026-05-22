@@ -10,8 +10,10 @@ import os
 import datetime
 
 
-def gen_hypercubes(d):
+def gen_hypercubes(d, no_loading=False):
     try:
+        if no_loading:
+            raise(Exception("No loading files"))
         data = np.load(f"matrices{d}.npz")
         hpoints1 = data['hpoints1']
         hpoints2 = data['hpoints2']
@@ -35,17 +37,17 @@ def gen_hypercubes(d):
                         hpoints1[j2, j] = (-2* ((v1&(1<<j2)) !=0 ))+1
                         hpoints2[j2, j] = (-2* ((v2&(1<<j2)) !=0 ))+1
                     j += 1
-        np.savez(f"matrices{d}.npz", hpoints1, hpoints2)
+        np.savez(f"matrices{d}.npz", hpoints1=hpoints1, hpoints2=hpoints2)
         return hpoints1, hpoints2
 
 def gen_reducehypercubes(d, b, no_loading=False):
     b = tuple(b)
     l_b = len(b)
     if sum(b)!=d:
-        raise("Invalid reduction (sum of b incorrect)")
+        raise(Exception("Invalid reduction (sum of b incorrect)"))
     try:
         if no_loading:
-            raise("No loading files")
+            raise(Exception("No loading files"))
         data = np.load(f"matrices_red{d}_{b}.npz")
         hpoints1 = data['hpoints1']
         hpoints2 = data['hpoints2']
@@ -84,7 +86,7 @@ def gen_reducehypercubes(d, b, no_loading=False):
                 hpoints1[i2, i] = p1[i2]
                 hpoints2[i2, i] = p2[i2]
         p_counts = np.diag(p_counts)
-        np.savez(f"matrices_red{d}_{b}.npz", hpoints1, hpoints2, p_counts)
+        np.savez(f"matrices_red{d}_{b}.npz", hpoints1=hpoints1, hpoints2=hpoints2, p_counts=p_counts)
         return hpoints1, hpoints2, p_counts
 
 
@@ -130,7 +132,7 @@ G_dict = {
     "relu": lambda x: np.sum(np.maximum(0,x)),
 }
 
-def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name:str, save=False, end_terms=None):
+def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name:str, save=False, end_terms=None, filename=None):
     """
 
     :param k:  - number of hyperplanes
@@ -143,8 +145,11 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
     :param G_name: function applied to
     :param end_terms: whether we optimize the constant terms of the hyperplanes or keep them constant
     :param save: do we save the results to the csv file
-    :return:
+    :param filename: file to save to, default results.csv
+    :return out_h: returns the config
     """
+    if filename is None:
+        filename = "results.csv"
     if reduction is not None:
         hpoints1, hpoints2, p_count = gen_reducehypercubes(d,reduction)
     else:
@@ -164,14 +169,14 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
         optfunc = get_optfunc(k, d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
     else:
         optfunc = get_optfunc_termconst(k, d, end_terms, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
-    t = time()
+    t = time.time()
     res = scipy.optimize.minimize(optfunc, h.flatten(), method='nelder-mead')
-    if end_terms is None:
-        out_h = np.concat((res.x.reshape((k,d)), end_terms.reshape((k,))), axis=1)
+    if end_terms is not None:
+        out_h = np.concat((res.x.reshape((k,d)), end_terms.reshape((k,1))), axis=1)
     else:
         out_h = res.x.reshape((k, d+1))
 
-    t = time()-t
+    t = time.time()-t
     countfunc = get_countfunc(k,d,hpoints1,hpoints2, W=p_count)
     count = countfunc(out_h)
 
@@ -188,14 +193,14 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
             "result_count": count}
     print(data)
     if save:
-        if not os.path.isfile("results.csv"):
+        if not os.path.isfile(filename):
             df = pd.DataFrame([data])
-            df.to_csv("results.csv")
+            df.to_csv(filename, index=False)
         else:
-            df=pd.read_csv("results.csv")
+            df=pd.read_csv(filename)
             df.loc[len(df)] = data
-            df.to_csv("results.csv")
-    return count
+            df.to_csv(filename, index=False)
+    return out_h
 
 def case_count(k,d, h, reduction,):
     """

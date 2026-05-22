@@ -5,7 +5,7 @@ import pytest
 
 @pytest.mark.parametrize("d", [3,4,5])
 def test_non_reduced_hyperplanes(d):
-    hpoints1, hpoints2 = gen_hypercubes(d)
+    hpoints1, hpoints2 = gen_hypercubes(d, no_loading=True)
     s=set()
     h_len = hpoints1.shape[1]
     for i1 in range(h_len):
