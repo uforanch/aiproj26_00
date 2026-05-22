@@ -1,6 +1,3 @@
-#set dimensions d, planes k
-# kd variables generated
-#do not need to generate cube
 import pprint
 from collections import Counter
 
@@ -90,22 +87,33 @@ def gen_reducehypercubes(d, b, no_loading=False):
         np.savez(f"matrices_red{d}_{b}.npz", hpoints1, hpoints2, p_counts)
         return hpoints1, hpoints2, p_counts
 
-#hpoints test in small cases - turn the above into a set of pairs
-#see if it has all the points
-
-
 
 def get_optfunc(k,d,hpoints1, hpoints2,F,G,W=None):
-    #F is normalizing (softmax?)
-    #G is max or something to make column of 0s to 0
     if W is None:
         W = np.identity(hpoints1.shape[1])
-    return lambda h :np.sum(np.apply_along_axis(G,1, F((h.reshape((k,d))@hpoints1-1)*(h.reshape((k,d))@hpoints2-1))@W))
+
+    def h_ext_to_h(k, d, h):
+        return h.reshape(k, d+1)[:,:-1]
+    def h_ext_to_terms(k, d, h):
+        return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
+    return lambda h :np.sum(np.apply_along_axis(G,1, F((h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h))*(h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W))
+
+
+def get_optfunc_termconst(k,d,end_terms, hpoints1, hpoints2,F,G,W=None):
+    if W is None:
+        W = np.identity(hpoints1.shape[1])
+    end_terms_matrix = np.broadcast_to(end_terms.reshape(k,1), (k,hpoints1.shape[1]))
+    return lambda h :np.sum(np.apply_along_axis(G,1, F((h.reshape((k,d))@hpoints1-end_terms_matrix)*(h.reshape((k,d))@hpoints2-end_terms_matrix))@W))
+
 
 def get_countfunc(k,d,hpoints1, hpoints2, W=None):
     if W is None:
         W = np.identity(hpoints1.shape[1])
-    return lambda h :np.sum(np.max(np.where((h.reshape((k,d))@hpoints1-1)*(h.reshape((k,d))@hpoints2-1)@W > 0,1.0,0.0),axis=0))
+    def h_ext_to_h(k, d, h):
+        return h.reshape(k, d+1)[:,:-1]
+    def h_ext_to_terms(k, d, h):
+        return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
+    return lambda h :np.sum(np.max(np.where(((h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h))*(h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W > 0,1.0,0.0),axis=0))
 
 
 F_dict = {
@@ -122,7 +130,21 @@ G_dict = {
     "relu": lambda x: np.sum(np.maximum(0,x)),
 }
 
-def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name:str, save=False):
+def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name:str, save=False, end_terms=None):
+    """
+
+    :param k:  - number of hyperplanes
+    :param d:  - number of
+    :param h_init: whether to initiation hyperplane with ones or random
+    :param opt_method: method for the sci py optimizer
+    :param opt_params:  tuning parameters for such
+    :param reduction: whether to reduce the hypercubes or not and how
+    :param F_name: function applied to map edge-hyperplane pairs to 0 or 1 continuously
+    :param G_name: function applied to
+    :param end_terms: whether we optimize the constant terms of the hyperplanes or keep them constant
+    :param save: do we save the results to the csv file
+    :return:
+    """
     if reduction is not None:
         hpoints1, hpoints2, p_count = gen_reducehypercubes(d,reduction)
     else:
@@ -130,15 +152,25 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
         p_count = None
     if h_init is None:
         h_init = "ones"
-    if h_init=="ones":
+    if h_init=="ones" and end_terms is not None:
         h=np.ones((k,d))
-    elif h_init=="random":
+    elif h_init=="random" and end_terms is not None:
         h=np.random.random((k,d))
-
-    optfunc = get_optfunc(k, d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+    elif h_init=="ones" and end_terms is None:
+        h=np.ones((k,d+1))
+    elif h_init=="random" and end_terms is None:
+        h=np.random.random((k,d+1))
+    if end_terms is None:
+        optfunc = get_optfunc(k, d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+    else:
+        optfunc = get_optfunc_termconst(k, d, end_terms, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
     t = time()
     res = scipy.optimize.minimize(optfunc, h.flatten(), method='nelder-mead')
-    out_h = res.x.reshape((k,d))
+    if end_terms is None:
+        out_h = np.concat((res.x.reshape((k,d)), end_terms.reshape((k,))), axis=1)
+    else:
+        out_h = res.x.reshape((k, d+1))
+
     t = time()-t
     countfunc = get_countfunc(k,d,hpoints1,hpoints2, W=p_count)
     count = countfunc(out_h)
@@ -150,6 +182,7 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
             "opt_method":opt_method,
             "opt_params":str(opt_params),
             "reduction":str(reduction),
+            "end terms": str(end_terms),
             "F":F_name, "G":G_name,
             "time":t,
             "result_count": count}
@@ -165,6 +198,14 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
     return count
 
 def case_count(k,d, h, reduction,):
+    """
+
+    :param k:  number of hyperplanes
+    :param d:  number of dimensions
+    :param h: k x d+1 hyperplane coefficients
+    :param reduction: whether to reduce hypercube
+    :return:
+    """
     if reduction is not None:
         hpoints1, hpoints2, p_count = gen_reducehypercubes(d, reduction)
     else:
