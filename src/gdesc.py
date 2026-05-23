@@ -98,14 +98,14 @@ def get_optfunc(k,d,hpoints1, hpoints2,F,G,W=None):
         return h.reshape(k, d+1)[:,:-1]
     def h_ext_to_terms(k, d, h):
         return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
-    return lambda h :np.sum(np.apply_along_axis(G,1, F((h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h))*(h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W))
+    return lambda h :np.sum(np.apply_along_axis(G,1, F(np.multiply(h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W))
 
 
 def get_optfunc_termconst(k,d,end_terms, hpoints1, hpoints2,F,G,W=None):
     if W is None:
         W = np.identity(hpoints1.shape[1])
     end_terms_matrix = np.broadcast_to(end_terms.reshape(k,1), (k,hpoints1.shape[1]))
-    return lambda h :np.sum(np.apply_along_axis(G,1, F((h.reshape((k,d))@hpoints1-end_terms_matrix)*(h.reshape((k,d))@hpoints2-end_terms_matrix))@W))
+    return lambda h :np.sum(np.apply_along_axis(G,1, F(np.multiply(h.reshape((k,d))@hpoints1-end_terms_matrix, h.reshape((k,d))@hpoints2-end_terms_matrix))@W))
 
 
 def get_countfunc(k,d,hpoints1, hpoints2, W=None):
@@ -115,7 +115,7 @@ def get_countfunc(k,d,hpoints1, hpoints2, W=None):
         return h.reshape(k, d+1)[:,:-1]
     def h_ext_to_terms(k, d, h):
         return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
-    return lambda h :np.sum(np.max(np.where(((h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h))*(h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W > 0,1.0,0.0),axis=0))
+    return lambda h :np.sum(np.max(np.where(np.multiply( h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h) )@W > 0,1.0,0.0),axis=0))
 
 
 F_dict = {
@@ -150,34 +150,38 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
     """
     if filename is None:
         filename = "results.csv"
+    h_d = d
     if reduction is not None:
         hpoints1, hpoints2, p_count = gen_reducehypercubes(d,reduction)
+        h_d = len(reduction)
     else:
         hpoints1, hpoints2 = gen_hypercubes(d)
         p_count = None
+
     if h_init is None:
         h_init = "ones"
     if h_init=="ones" and end_terms is not None:
-        h=np.ones((k,d))
+        h=np.ones((k,h_d))
     elif h_init=="random" and end_terms is not None:
-        h=np.random.random((k,d))
+        h=np.random.random((k,h_d))
     elif h_init=="ones" and end_terms is None:
-        h=np.ones((k,d+1))
+        h=np.ones((k,h_d+1))
     elif h_init=="random" and end_terms is None:
-        h=np.random.random((k,d+1))
+        h=np.random.random((k,h_d+1))
     if end_terms is None:
-        optfunc = get_optfunc(k, d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+        optfunc = get_optfunc(k, h_d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
     else:
-        optfunc = get_optfunc_termconst(k, d, end_terms, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+        optfunc = get_optfunc_termconst(k, h_d, end_terms, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
     t = time.time()
     res = scipy.optimize.minimize(optfunc, h.flatten(), method='nelder-mead')
+    print(res.fun)
     if end_terms is not None:
-        out_h = np.concat((res.x.reshape((k,d)), end_terms.reshape((k,1))), axis=1)
+        out_h = np.concat((res.x.reshape((k,h_d)), end_terms.reshape((k,1))), axis=1)
     else:
-        out_h = res.x.reshape((k, d+1))
+        out_h = res.x.reshape((k, h_d+1))
 
     t = time.time()-t
-    countfunc = get_countfunc(k,d,hpoints1,hpoints2, W=p_count)
+    countfunc = get_countfunc(k,h_d,hpoints1,hpoints2, W=p_count)
     count = countfunc(out_h)
 
     data = {"date":datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") ,
