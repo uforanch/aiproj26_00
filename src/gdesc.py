@@ -81,25 +81,24 @@ def gen_reducehypercubes(d, b, no_loading=False):
         hpoints2 = np.ones((l_b,l))
         for i, P in enumerate(edge_count):
             p1,p2 = P
-            p_counts[i] = edge_count[(p1,p2)]/2
+            p_counts[i] = edge_count[(p1,p2)]
             for i2 in range(l_b):
                 hpoints1[i2, i] = p1[i2]
                 hpoints2[i2, i] = p2[i2]
-        p_counts = np.diag(p_counts)
+        p_counts = np.diag(p_counts)/2
         np.savez(f"matrices_red{d}_{b}.npz", hpoints1=hpoints1, hpoints2=hpoints2, p_counts=p_counts)
         return hpoints1, hpoints2, p_counts
-
 
 def get_optfunc(k,d,hpoints1, hpoints2,F,G,W=None):
     if W is None:
         W = np.identity(hpoints1.shape[1])
 
     def h_ext_to_h(k, d, h):
-        return h.reshape(k, d+1)[:,:-1]
+        return h.reshape(k, d+1)[:,:-1] / np.linalg.norm( h.reshape(k, d+1)[:,:-1], axis=1, keepdims=True)
     def h_ext_to_terms(k, d, h):
-        return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
-    return lambda h :np.sum(np.apply_along_axis(G,1, F(np.multiply(h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W))
+        return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1])) / np.linalg.norm( h.reshape(k, d+1)[:,:-1], axis=1, keepdims=True)
 
+    return lambda h :np.sum(np.apply_along_axis(G,1, F(np.multiply(h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h)))@W))
 
 def get_optfunc_termconst(k,d,end_terms, hpoints1, hpoints2,F,G,W=None):
     if W is None:
@@ -115,14 +114,15 @@ def get_countfunc(k,d,hpoints1, hpoints2, W=None):
         return h.reshape(k, d+1)[:,:-1]
     def h_ext_to_terms(k, d, h):
         return np.broadcast_to(h.reshape(k, d+1)[:,-1:], (k,hpoints1.shape[1]))
-    return lambda h :np.sum(np.max(np.where(np.multiply( h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h) )@W > 0,1.0,0.0),axis=0))
+    return lambda h :np.sum(np.max(np.where(np.multiply( h_ext_to_h(k, d, h)@hpoints1-h_ext_to_terms(k, d, h), h_ext_to_h(k, d, h).reshape((k,d))@hpoints2-h_ext_to_terms(k, d, h) ) < 0,1.0,0.0),axis=0)@W)
 
 
 F_dict = {
-    "sum":np.sum,
+    "id":lambda x: x,
     "softmax": lambda x:  np.log(1+np.exp(x)),
     "sigmoid": scipy.special.expit,
     "relu": lambda x: np.maximum(0,x),
+    "sm_00": lambda x: np.exp(x)
 }
 
 G_dict = {
@@ -130,6 +130,7 @@ G_dict = {
     "softmax": lambda x:  np.log(1+np.exp(np.sum(x))),
     "sigmoid": lambda x: scipy.special.expit(np.sum(x)),
     "relu": lambda x: np.sum(np.maximum(0,x)),
+    "sm_00": lambda x: np.log(np.sum(x))
 }
 
 def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name:str, save=False, end_terms=None, filename=None):
@@ -168,10 +169,12 @@ def case_solve(k,d,h_init, opt_method, opt_params, reduction, F_name:str, G_name
         h=np.ones((k,h_d+1))
     elif h_init=="random" and end_terms is None:
         h=np.random.random((k,h_d+1))
+    F = F_dict[F_name]
+    G = G_dict[G_name]
     if end_terms is None:
-        optfunc = get_optfunc(k, h_d, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+        optfunc = get_optfunc(k, h_d, hpoints1, hpoints2, F, G, W=p_count)
     else:
-        optfunc = get_optfunc_termconst(k, h_d, end_terms, hpoints1, hpoints2, lambda x: x, np.sum, W=p_count)
+        optfunc = get_optfunc_termconst(k, h_d, end_terms, hpoints1, hpoints2, F, G, W=p_count)
     t = time.time()
     res = scipy.optimize.minimize(optfunc, h.flatten(), method='nelder-mead')
     print(res.fun)
